@@ -220,6 +220,12 @@ img{display:block;}
 .thr-item{width:46px;height:58px;border-radius:8px;overflow:hidden;background:var(--surface-2);border:2px solid transparent;flex-shrink:0;cursor:pointer;}
 .thr-item img{width:100%;height:100%;object-fit:cover;}
 .thr-item.on{border-color:var(--black);box-shadow:0 2px 8px rgba(0,0,0,.15);}
+
+/* ===== 一键拍照/相册快速添加 ===== */
+.quick-add{display:flex;align-items:center;justify-content:center;gap:8px;padding:15px;border:1.6px dashed #cdb9a3;background:linear-gradient(180deg,#fffaf3,#fdf6ec);border-radius:14px;color:#8a6d4f;font-size:14px;font-weight:500;cursor:pointer;margin-bottom:14px;user-select:none;-webkit-tap-highlight-color:transparent;}
+.quick-add:active{background:#f7ecdc;}
+.quick-add .cam{font-size:19px;}
+.quick-add-hint{font-size:11px;color:var(--ink-faint);text-align:center;margin:-8px 0 16px;}
 </style>
 </head>
 <body>
@@ -233,6 +239,9 @@ img{display:block;}
 
 <!-- 弹窗 -->
 <div class="modal-overlay" id="modalOverlay"><div class="modal" id="modalContent"></div></div>
+
+<!-- 一键拍照/相册快速添加（隐藏的文件选择框） -->
+<input type="file" id="quickPhotoInput" accept="image/*" multiple style="display:none;">
 
 <script>
 /* ========== 数据层 ========== */
@@ -544,6 +553,9 @@ function renderWardrobe(){
   <div class="filter-row">${STYLES.map(s=>`<span class="fpill ${f.style===s?'active':''}" data-act="setStyleFilter" data-v="${esc(s)}">${s}</span>`).join('')}</div>
   <div class="selector-label" style="margin-top:4px;margin-bottom:8px;font-size:13px;color:var(--ink-soft);font-weight:400;display:flex;align-items:center;gap:5px;"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>风格筛选</div>
 
+  <div class="quick-add" data-act="quickPhoto"><span class="cam">📷</span> 拍照 / 选照片,一键添加多件</div>
+  <div class="quick-add-hint">选完照片会自动变成单品,点卡片可补全名称、分类</div>
+
   <div class="closet-grid">
     ${items.length?items.map(c=>`
       <div class="item-card">
@@ -688,6 +700,7 @@ function handleAction(act,el){
     case 'setSeasonFilter': state.filters.season=el.dataset.v; save(); renderModule(); break;
     case 'setStyleFilter': state.filters.style=el.dataset.v; save(); renderModule(); break;
     case 'addItem': showModal('addItem'); break;
+    case 'quickPhoto': { const inp=document.getElementById('quickPhotoInput'); if(inp) inp.click(); break; }
     case 'editItem': showModal('addItem', el.dataset.id); break;
     case 'deleteItem': showConfirm('确定删除这件单品？','item',el.dataset.id); break;
     case 'freeMatch': showModal('freeMatch'); break;
@@ -946,6 +959,23 @@ document.addEventListener('click',e=>{
   }
   handleAction(act,el);
 });
+
+/* ========== 一键拍照/相册快速添加 ========== */
+function handleQuickPhotos(files){
+  const arr=Array.from(files||[]); if(!arr.length) return;
+  let done=0;
+  arr.forEach((f,i)=>{
+    if(!f.type||f.type.indexOf('image/')!==0){ if(++done===arr.length) finish(); return; }
+    const r=new FileReader();
+    r.onload=()=>{
+      state.clothes.push({id:uid(),name:'我的单品 '+(i+1),category:'衣服',type:'上装',season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:r.result,price:null,brand:'',wearCount:0,lastWorn:'',tags:[]});
+      if(++done===arr.length) finish();
+    };
+    r.readAsDataURL(f);
+  });
+  function finish(){ save(); renderModule(); toast('已添加 '+arr.length+' 件,点卡片可补全信息 ✓'); }
+}
+document.addEventListener('change',e=>{ if(e.target&&e.target.id==='quickPhotoInput'){ handleQuickPhotos(e.target.files); e.target.value=''; } });
 
 /* ========== Toast ========== */
 function toast(msg){

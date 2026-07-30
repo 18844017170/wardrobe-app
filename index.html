@@ -202,11 +202,14 @@ img{display:block;}
 .fl-item img{width:100%;height:100%;object-fit:cover;display:block;}
 .fl-item .fl-nm{position:absolute;bottom:0;left:0;right:0;font-size:10px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.45));padding:16px 6px 4px;text-align:center;line-height:1.2;}
 /* 平铺位置模板 */
-.fl-t1{top:8%;left:28%;width:38%;height:26%;}
-.fl-b1{top:36%;left:22%;width:44%;height:42%;}
-.fl-s1{top:82%;left:34%;width:22%;height:12%;}
-.fl-a1{top:4%;left:56%;width:18%;height:10%;}
-.fl-a2{top:52%;left:68%;width:22%;height:18%;}
+.fl-t1{top:6%;left:26%;width:36%;height:24%;}
+.fl-b1{top:34%;left:20%;width:44%;height:42%;}
+.fl-s1{top:80%;left:32%;width:22%;height:12%;}
+.fl-a1{top:3%;left:58%;width:18%;height:9%;}
+.fl-a2{top:50%;left:66%;width:22%;height:17%;}
+.fl-t2{top:2%;left:8%;width:16%;height:14%;}
+.fl-b2{top:38%;left:66%;width:20%;height:28%;}
+.fl-s2{top:82%;left:58%;width:18%;height:11%;}
 .combobar{display:flex;align-items:center;justify-content:center;gap:14px;margin:8px 0 2px;}
 .combobar.solo{font-size:13px;color:var(--ink-faint);}
 .cb-arrow{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:20px;line-height:1;color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
@@ -287,7 +290,7 @@ async function idbLoad(){
 
 function _migrate(s){
   const base=defaultState();
-  ['match','wardrobeTab','filters','profile','preview'].forEach(k=>{ if(s[k]===undefined) s[k]=base[k]; });
+  ['match','wardrobeTab','filters','profile','preview','aiKey'].forEach(k=>{ if(s[k]===undefined) s[k]=base[k]; });
   return s;
 }
 
@@ -389,6 +392,7 @@ function defaultState(){
     outfits:[],
     profile:{height:'',weight:'',bodyType:''},
     preview:[],
+    aiKey:'',
   };
 }
 let state;
@@ -726,6 +730,17 @@ function handleAction(act,el){
       if(photos&&photos.length) handleQuickPhotos(photos,k);
       break;
     }
+    case 'aiClassify': {
+      const keyInput=$('#aiKeyInput');
+      const key=(keyInput?keyInput.value.trim():'')||state.aiKey||'';
+      if(!key){ toast('请输入 Gemini API Key'); break; }
+      state.aiKey=key; save();
+      const photos=_pendingPhotos; _pendingPhotos=null;
+      closeModal();
+      if(photos&&photos.length) aiClassifyPhotos(photos,key);
+      else toast('没有待识别的照片');
+      break;
+    }
     case 'editItem': showModal('addItem', el.dataset.id); break;
     case 'deleteItem': showConfirm('确定删除这件单品？','item',el.dataset.id); break;
     case 'freeMatch': showModal('freeMatch'); break;
@@ -769,6 +784,15 @@ function handleAction(act,el){
       state.preview=[]; _pv=null;
       save(); closeModal(); renderModule();
       toast('已保存为搭配 ✓'); break;
+    }
+    case 'savePreviewAll': {
+      const ids=(state.preview||[]).slice();
+      if(!ids.length){ toast('先选几件单品'); break; }
+      const outfit={id:uid(),name:'我的搭配',scene:state.match.scene,temp:[state.match.temp-1,state.match.temp+1],weather:[state.match.weather],items:ids,date:todayStr(),note:''};
+      state.outfits.unshift(outfit);
+      state.preview=[]; _pv=null;
+      save(); closeModal(); renderModule();
+      toast('已保存 '+ids.length+' 件为搭配 ✓'); break;
     }
   }
 }
@@ -881,27 +905,41 @@ function showModal(type, editId){
     overlay.classList.add('show');return;
   }
   else if(type==='preview'){
-    _pv=buildPreviewCombos(); _pvIdx=0;
-      content.innerHTML=`<h3>搭配预览</h3>
-      <p style="font-size:12px;color:var(--ink-faint);margin-bottom:6px;margin-top:-4px;">所有单品拼在一起，看看色系搭什么感觉 ↓</p>
-      <div id="pvBody">${pvInner()}</div>
+    const ids=state.preview||[];
+    const items=ids.map(id=>getClothById(id)).filter(Boolean);
+    const total=items.length;
+    // 平铺展示所有选中单品(全部在一起)
+    const positions=[
+      {cls:'fl-t1',label:'上装'}, {cls:'fl-b1',label:'下装'},
+      {cls:'fl-s1',label:'鞋'}, {cls:'fl-a1',label:'配饰1'},
+      {cls:'fl-a2',label:'配饰2'}, {cls:'fl-t2',label:'上装2'},
+      {cls:'fl-b2',label:'下装2'}, {cls:'fl-s2',label:'鞋2'}
+    ];
+    const flHTML=(item,idx)=>{
+      if(!item) return '';
+      const pos=positions[idx%positions.length];
+      if(item.img) return `<div class="fl-item ${pos.cls}"><img src="${esc(item.img)}" alt="${esc(item.name||'')}"><span class="fl-nm">${esc(item.name)}</span></div>`;
+      return `<div class="fl-item ${pos.cls}" style="background:rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-size:22px;color:#b8b0a0;">?</div>`;
+    };
+    const fig=`<div class="flatlay-wrap">${items.map((it,i)=>flHTML(it,i)).join('')}</div>`;
+    content.innerHTML=`<h3>搭配预览</h3>
+      <p style="font-size:12px;color:var(--ink-faint);margin-bottom:6px;margin-top:-4px;">已选 ${total} 件单品，全部拼在一起 ↓</p>
+      ${fig}
       <div class="acts" style="margin-top:14px;">
         <button class="btn" data-act="cancelPreview">继续选</button>
-        <button class="btn primary" data-act="savePreviewOutfit">保存为搭配</button>
+        <button class="btn primary" data-act="savePreviewAll">保存这套搭配</button>
       </div>`;
     overlay.classList.add('show');
-    const body=$('#pvBody');
-    let sx=0,sy=0;
-    body.addEventListener('touchstart',e=>{const t=e.touches[0];sx=t.clientX;sy=t.clientY;},{passive:true});
-    body.addEventListener('touchend',e=>{const t=e.changedTouches[0];const dx=t.clientX-sx,dy=t.clientY-sy;if(Math.abs(dx)>30&&Math.abs(dx)>Math.abs(dy)){pvGo(dx<0?1:-1);}},{passive:true});
     return;
   }
   else if(type==='quickCat'){
-    const cats=[['top','👕 上装'],['bottom','👖 下装'],['shoes','👟 鞋'],['acc','👜 配饰']];
+    const cats=[['top','👕 上装'],['bottom','👖 下装'],['outer','🧥 外套'],['dress','👗 连衣裙'],['shoes','👟 鞋'],['bag','👜 包包'],['acc','💎 配饰']];
+    const hasAI=!!(state.aiKey||'');
     content.innerHTML=`<h3>这些照片是？</h3>
-      <p style="font-size:12px;color:var(--ink-faint);margin-bottom:12px;margin-top:-4px;">点一类,照片会自动归到对应分类</p>
+      <p style="font-size:12px;color:var(--ink-faint);margin-bottom:10px;margin-top:-4px;">点一类自动归类，或用 AI 智能识别 ↓</p>
       <div class="quick-cat-grid">${cats.map(([k,label])=>`<button class="quick-cat" data-act="quickCatPick" data-cat="${k}">${label}</button>`).join('')}</div>
-      <div class="acts"><button class="btn" data-act="cancelModal">取消</button></div>`;
+      ${hasAI?'':'<div style="margin-top:8px;"><input id="aiKeyInput" placeholder="粘贴 Gemini API Key(可选,开启AI识别)" style="width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid var(--line);border-radius:10px;font-size:12px;"></div><button class="btn primary sm" style="width:100%;margin-top:6px;" data-act="aiClassify">🤖 AI 智能识别分类</button><p style="font-size:10px;color:var(--ink-faint);margin-top:4px;">免费获取: aistudio.google.com/apikey</p>'}
+      <div class="acts" style="margin-top:10px;"><button class="btn" data-act="cancelModal">取消</button></div>`;
     overlay.classList.add('show');return;
   }
 
@@ -999,8 +1037,18 @@ document.addEventListener('click',e=>{
 });
 
 /* ========== 一键拍照/相册快速添加（带自动归类） ========== */
-const _CATMAP={top:{category:'衣服',type:'上装'},bottom:{category:'衣服',type:'下装'},shoes:{category:'鞋',type:'休闲鞋'},acc:{category:'配饰',type:'包袋'}};
-const _CATLABEL={top:'上装',bottom:'下装',shoes:'鞋',acc:'配饰'};
+const _CATMAP={top:{category:'衣服',type:'上装'},bottom:{category:'衣服',type:'下装'},outer:{category:'衣服',type:'外套'},dress:{category:'衣服',type:'连衣裙'},shoes:{category:'鞋',type:'休闲鞋'},bag:{category:'配饰',type:'包袋'},acc:{category:'配饰',type:'配饰'}};
+const _CATLABEL={top:'上装',bottom:'下装',outer:'外套',dress:'连衣裙',shoes:'鞋',bag:'包包',acc:'配饰'};
+/* AI 分类映射：Gemini 返回的关键词 → 内部类别 */
+const _AI_MAP={
+  '上装|上衣|T恤|衬衫|卫衣|毛衣|针织|背心|吊带|短袖|长袖|blouse|shirt|top|sweater|hoodie|tank':'top',
+  '下装|裤子|牛仔裤|短裤|裙裤|阔腿裤|直筒裤|西裤|休闲裤|pants|jeans|trousers|shorts':'bottom',
+  '外套|大衣|风衣|夹克|西装|羽绒服|棉服|开衫|coat|jacket|blazer|cardigan|outerwear':'outer',
+  '连衣裙|裙子|长裙|短裙|半身裙|吊带裙|dress|skirt':'dress',
+  '鞋|运动鞋|小白鞋|靴子|高跟鞋|平底鞋|乐福鞋|凉鞋|帆布鞋|shoes|sneakers|boots|heels':'shoes',
+  '包|手提包|斜挎包|背包|双肩包|链条包|托特包|bag|handbag|purse|backpack|tote':'bag',
+  '帽子|墨镜|眼镜|项链|耳环|手链|戒指|手表|丝巾|腰带|发饰|cap|hat|sunglasses|glasses|necklace|earring|bracelet|watch|scarf|belt':'acc'
+};
 function handleQuickPhotos(files, catKey){
   const arr=Array.from(files||[]).filter(f=>f&&f.type&&f.type.indexOf('image/')===0); if(!arr.length) return;
   const cat=_CATMAP[catKey]||{category:'衣服',type:'上装'};
@@ -1017,6 +1065,66 @@ function handleQuickPhotos(files, catKey){
   function finish(){ save(); renderModule(); toast('已添加 '+arr.length+' 件'+label+' ✓'); }
 }
 document.addEventListener('change',e=>{ if(e.target&&e.target.id==='quickPhotoInput'){ if(e.target.files&&e.target.files.length){ _pendingPhotos=Array.from(e.target.files); showModal('quickCat'); } e.target.value=''; } });
+
+/* ========== AI 智能识别分类 (Google Gemini Vision) ========== */
+function aiClassifyPhotos(files,apiKey){
+  const arr=Array.from(files||[]).filter(f=>f&&f.type&&f.type.indexOf('image/')===0);
+  if(!arr.length){ toast('没有有效图片'); return; }
+  toast('AI 正在识别 '+arr.length+' 张照片...');
+  let done=0, added=0;
+  const prompt=`你是一个服装分类专家。请判断这张图片中的单品属于以下哪一类，只返回一个类别关键词：
+上装、下装外套、连衣裙、鞋、包包、配饰。
+规则：
+- T恤/衬衫/卫衣/毛衣/背心 → 上装
+- 裤子/短裤/牛仔裤 → 下装
+- 大衣/风衣/夹克/西装/羽绒服/开衫 → 外套
+- 连衣裙/裙子 → 连衣裙
+- 运动鞋/靴子/高跟鞋/凉鞋 → 鞋
+- 手提包/双肩包/链条包 → 包包
+- 墨镜/帽子/项链/耳环/手表/腰带/丝巾 → 配饰
+
+只回复一个词，不要解释。`;
+  arr.forEach((f,i)=>{
+    const reader=new FileReader();
+    reader.onload=async ()=>{
+      try{
+        const b64=reader.result.split(',')[1];
+        const resp=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+apiKey,{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            contents:[{parts:[
+              {text:prompt},
+              {inline_data:{mime_type:f.type,data:b64}}
+            ]}],
+            generationConfig:{temperature:0.1,maxOutputTokens:10}
+          })
+        });
+        const data=await resp.json();
+        let raw=(data.candidates?.[0]?.content?.parts?.[0]?.text||'').trim();
+        // 匹配类别
+        let catKey='top';
+        for(const [k,v] of Object.entries(_AI_MAP)){
+          const keys=v.split('|');
+          if(keys.some(k2=>raw.toLowerCase().includes(k2.toLowerCase()))){catKey=k;break;}
+        }
+        const cat=_CATMAP[catKey]||_CATMAP.top;
+        state.clothes.push({id:uid(),name:_CATLABEL[catKey]+' '+(added+1),category:cat.category,type:cat.type,season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:reader.result,price:null,brand:'',wearCount:0,lastWorn:'',tags:[],aiRaw:raw});
+        added++;
+      }catch(e){
+        console.warn('AI classify error:',e);
+        // fallback:默认归为上装
+        state.clothes.push({id:uid(),name:'我的单品 '+(added+1),category:'衣服',type:'上装',season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:reader.result,price:null,brand:'',wearCount:0,lastWorn:'',tags:[]});
+        added++;
+      }
+      if(++done===arr.length){
+        save(); renderModule();
+        toast('AI 识别完成!已添加 '+added+' 件 ✓');
+      }
+    };
+    reader.readAsDataURL(f);
+  });
+}
 
 /* ========== 拖拽排序（触摸 Pointer 事件） ========== */
 function attachSortHandlers(){

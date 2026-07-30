@@ -226,6 +226,17 @@ img{display:block;}
 .quick-add:active{background:#f7ecdc;}
 .quick-add .cam{font-size:19px;}
 .quick-add-hint{font-size:11px;color:var(--ink-faint);text-align:center;margin:-8px 0 16px;}
+
+/* ===== 拖拽排序 ===== */
+.sort-mode .item-actions{display:none;}
+.sort-mode .item-card{touch-action:none;cursor:grab;}
+.item-card.dragging{opacity:.9;transform:scale(1.03);z-index:6;box-shadow:0 10px 24px rgba(0,0,0,.22);cursor:grabbing;}
+.sort-tip{font-size:11px;color:var(--ink-faint);text-align:center;margin:4px 0 12px;}
+
+/* ===== 快速上传选类 ===== */
+.quick-cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
+.quick-cat{padding:18px 10px;border:1.5px solid var(--line);border-radius:14px;background:var(--surface);font-size:15px;font-weight:500;color:var(--ink);cursor:pointer;text-align:center;}
+.quick-cat:active{background:var(--surface-2);border-color:#bbb;}
 </style>
 </head>
 <body>
@@ -458,7 +469,7 @@ function renderTopbar(){
   }else if(state.nav==='wardrobe'){
     const n=state.clothes.filter(c=>c.category==='衣服').length;
     tb.innerHTML=`<div class="tb-title">衣橱<span class="tb-sub">· ${state.clothes.length}件</span></div>
-      <div class="tb-actions"><button class="btn dark sm" data-act="freeMatch">自由搭配</button><button class="btn round primary" data-act="addItem">＋</button></div>`;
+      <div class="tb-actions"><button class="btn dark sm" data-act="freeMatch">自由搭配</button><button class="btn sm ${sortMode?'primary':''}" data-act="toggleSort">${sortMode?'完成 ✓':'↕ 排序'}</button><button class="btn round primary" data-act="addItem">＋</button></div>`;
   }else if(state.nav==='library'){
     tb.innerHTML=`<div class="tb-title">搭配库</div><div class="tb-actions"><button class="btn round primary" data-act="addOutfit">＋</button></div>`;
   }else if(state.nav==='stats'){
@@ -476,6 +487,7 @@ function renderModule(){
   else if(mod==='library') html=renderLibrary();
   else if(mod==='stats') html=renderStats();
   $('#module').innerHTML=html;
+  if(sortMode && mod==='wardrobe') attachSortHandlers();
 }
 
 /* ===== 智能建议 / 衣橱提醒 ===== */
@@ -555,10 +567,11 @@ function renderWardrobe(){
 
   <div class="quick-add" data-act="quickPhoto"><span class="cam">📷</span> 拍照 / 选照片,一键添加多件</div>
   <div class="quick-add-hint">选完照片会自动变成单品,点卡片可补全名称、分类</div>
+  ${sortMode?`<div class="sort-tip">按住卡片上下拖动即可调换顺序,完成后点「完成 ✓」</div>`:''}
 
   <div class="closet-grid">
     ${items.length?items.map(c=>`
-      <div class="item-card">
+      <div class="item-card" data-id="${c.id}">
         <div class="item-img">${imgTag(c)}
           <div class="item-actions">
             <div class="item-action" data-act="editItem" data-id="${c.id}" title="编辑"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#666" stroke-width="1.5"><path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></div>
@@ -674,6 +687,9 @@ function renderStats(){
 let pendingDel=null;
 /* 真人模板预览：组合缓存与当前索引 */
 let _pv=null, _pvIdx=0;
+/* 拖拽排序 / 快速上传暂存 */
+let sortMode=false;
+let _pendingPhotos=null;
 function showConfirm(title,type,id){
   pendingDel={type,id};
   const overlay=$('#modalOverlay'),content=$('#modalContent');
@@ -701,6 +717,15 @@ function handleAction(act,el){
     case 'setStyleFilter': state.filters.style=el.dataset.v; save(); renderModule(); break;
     case 'addItem': showModal('addItem'); break;
     case 'quickPhoto': { const inp=document.getElementById('quickPhotoInput'); if(inp) inp.click(); break; }
+    case 'toggleSort': sortMode=!sortMode; renderModule(); break;
+    case 'cancelModal': closeModal(); break;
+    case 'quickCatPick': {
+      const k=el.dataset.cat;
+      const photos=_pendingPhotos; _pendingPhotos=null;
+      closeModal();
+      if(photos&&photos.length) handleQuickPhotos(photos,k);
+      break;
+    }
     case 'editItem': showModal('addItem', el.dataset.id); break;
     case 'deleteItem': showConfirm('确定删除这件单品？','item',el.dataset.id); break;
     case 'freeMatch': showModal('freeMatch'); break;
@@ -871,6 +896,14 @@ function showModal(type, editId){
     body.addEventListener('touchend',e=>{const t=e.changedTouches[0];const dx=t.clientX-sx,dy=t.clientY-sy;if(Math.abs(dx)>30&&Math.abs(dx)>Math.abs(dy)){pvGo(dx<0?1:-1);}},{passive:true});
     return;
   }
+  else if(type==='quickCat'){
+    const cats=[['top','👕 上装'],['bottom','👖 下装'],['shoes','👟 鞋'],['acc','👜 配饰']];
+    content.innerHTML=`<h3>这些照片是？</h3>
+      <p style="font-size:12px;color:var(--ink-faint);margin-bottom:12px;margin-top:-4px;">点一类,照片会自动归到对应分类</p>
+      <div class="quick-cat-grid">${cats.map(([k,label])=>`<button class="quick-cat" data-act="quickCatPick" data-cat="${k}">${label}</button>`).join('')}</div>
+      <div class="acts"><button class="btn" data-act="cancelModal">取消</button></div>`;
+    overlay.classList.add('show');return;
+  }
 
   content.innerHTML=html;
   overlay.classList.add('show');
@@ -960,22 +993,61 @@ document.addEventListener('click',e=>{
   handleAction(act,el);
 });
 
-/* ========== 一键拍照/相册快速添加 ========== */
-function handleQuickPhotos(files){
-  const arr=Array.from(files||[]); if(!arr.length) return;
+/* ========== 一键拍照/相册快速添加（带自动归类） ========== */
+const _CATMAP={top:{category:'衣服',type:'上装'},bottom:{category:'衣服',type:'下装'},shoes:{category:'鞋',type:'休闲鞋'},acc:{category:'配饰',type:'包袋'}};
+const _CATLABEL={top:'上装',bottom:'下装',shoes:'鞋',acc:'配饰'};
+function handleQuickPhotos(files, catKey){
+  const arr=Array.from(files||[]).filter(f=>f&&f.type&&f.type.indexOf('image/')===0); if(!arr.length) return;
+  const cat=_CATMAP[catKey]||{category:'衣服',type:'上装'};
+  const label=_CATLABEL[catKey]||'单品';
   let done=0;
   arr.forEach((f,i)=>{
-    if(!f.type||f.type.indexOf('image/')!==0){ if(++done===arr.length) finish(); return; }
     const r=new FileReader();
     r.onload=()=>{
-      state.clothes.push({id:uid(),name:'我的单品 '+(i+1),category:'衣服',type:'上装',season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:r.result,price:null,brand:'',wearCount:0,lastWorn:'',tags:[]});
+      state.clothes.push({id:uid(),name:label+' '+(i+1),category:cat.category,type:cat.type,season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:r.result,price:null,brand:'',wearCount:0,lastWorn:'',tags:[]});
       if(++done===arr.length) finish();
     };
     r.readAsDataURL(f);
   });
-  function finish(){ save(); renderModule(); toast('已添加 '+arr.length+' 件,点卡片可补全信息 ✓'); }
+  function finish(){ save(); renderModule(); toast('已添加 '+arr.length+' 件'+label+' ✓'); }
 }
-document.addEventListener('change',e=>{ if(e.target&&e.target.id==='quickPhotoInput'){ handleQuickPhotos(e.target.files); e.target.value=''; } });
+document.addEventListener('change',e=>{ if(e.target&&e.target.id==='quickPhotoInput'){ if(e.target.files&&e.target.files.length){ _pendingPhotos=Array.from(e.target.files); showModal('quickCat'); } e.target.value=''; } });
+
+/* ========== 拖拽排序（触摸 Pointer 事件） ========== */
+function attachSortHandlers(){
+  const grid=document.querySelector('.closet-grid'); if(!grid) return;
+  grid.querySelectorAll('.item-card').forEach(card=>card.addEventListener('pointerdown', onDragStart));
+}
+function onDragStart(e){
+  if(!sortMode) return;
+  const card=e.currentTarget, grid=card.parentElement;
+  const startX=e.clientX, startY=e.clientY; let started=false, lastY=startY;
+  function move(ev){
+    const dx=ev.clientX-startX, dy=ev.clientY-startY;
+    if(!started){ if(Math.hypot(dx,dy)<6) return; started=true; card.classList.add('dragging'); try{card.setPointerCapture(e.pointerId);}catch(_){} }
+    card.style.transform=`translate(${dx}px,${dy}px)`; lastY=ev.clientY;
+  }
+  function up(){
+    card.removeEventListener('pointermove',move); card.removeEventListener('pointerup',up); card.removeEventListener('pointercancel',up);
+    if(!started) return;
+    card.classList.remove('dragging'); card.style.transform='';
+    const ids=[...grid.querySelectorAll('.item-card')].map(c=>c.dataset.id);
+    const from=ids.indexOf(card.dataset.id); ids.splice(from,1);
+    const others=[...grid.querySelectorAll('.item-card')].filter(c=>c!==card);
+    let ref=null;
+    for(const o of others){ const r=o.getBoundingClientRect(); if(lastY < r.top + r.height/2){ ref=o; break; } }
+    const insertAt = ref? ids.indexOf(ref.dataset.id) : ids.length;
+    ids.splice(insertAt,0,card.dataset.id);
+    reorderClothes(ids); save(); renderModule();
+  }
+  card.addEventListener('pointermove',move); card.addEventListener('pointerup',up); card.addEventListener('pointercancel',up);
+}
+function reorderClothes(ids){
+  const catMap={clothes:'衣服',shoes:'鞋',acc:'配饰'}; const cat=catMap[state.wardrobeTab];
+  const inTab=c=>c.category===cat;
+  const reordered=ids.map(id=>state.clothes.find(c=>c.id===id)).filter(Boolean);
+  let i=0; state.clothes=state.clothes.map(c=> inTab(c)? reordered[i++] : c);
+}
 
 /* ========== Toast ========== */
 function toast(msg){

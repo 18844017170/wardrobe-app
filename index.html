@@ -196,18 +196,18 @@ img{display:block;}
   .modal{max-width:100%;margin:8px;border-radius:var(--radius);}
 }
 
-/* ===== 真人模板预览 ===== */
-.figwrap{position:relative;width:180px;height:360px;margin:2px auto;}
-.figsil{position:absolute;inset:0;width:100%;height:100%;}
-.slot{position:absolute;left:0;right:0;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.5);}
-.slot img{width:100%;height:100%;object-fit:cover;}
-.slot .nm{font-size:11px;color:#9a9384;padding:3px;text-align:center;line-height:1.3;}
-.slot.empty{background:rgba(0,0,0,.035);border:1.5px dashed #d8d2c8;color:#c2bbac;font-size:22px;}
-.slot-top{top:15%;left:19%;right:19%;height:25%;}
-.slot-bottom{top:40%;left:22%;right:22%;height:40%;}
-.slot-shoe{top:82%;left:31%;right:31%;height:13%;}
-.slot-acc{top:11%;left:34%;right:34%;height:7%;}
-.combobar{display:flex;align-items:center;justify-content:center;gap:14px;margin:12px 0 2px;}
+/* ===== 平铺拼图预览 ===== */
+.flatlay-wrap{position:relative;width:260px;height:320px;margin:4px auto 10px;border-radius:18px;overflow:hidden;background:linear-gradient(160deg,#f7f3ef,#f0ece5,#eae3d8);box-shadow:inset 0 0 30px rgba(255,255,255,.35),0 6px 24px rgba(0,0,0,.08);}
+.fl-item{position:absolute;border-radius:12px;overflow:hidden;box-shadow:0 3px 14px rgba(0,0,0,.11),0 1px 3px rgba(0,0,0,.06);transition:transform .18s ease;}
+.fl-item img{width:100%;height:100%;object-fit:cover;display:block;}
+.fl-item .fl-nm{position:absolute;bottom:0;left:0;right:0;font-size:10px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.45));padding:16px 6px 4px;text-align:center;line-height:1.2;}
+/* 平铺位置模板 */
+.fl-t1{top:8%;left:28%;width:38%;height:26%;}
+.fl-b1{top:36%;left:22%;width:44%;height:42%;}
+.fl-s1{top:82%;left:34%;width:22%;height:12%;}
+.fl-a1{top:4%;left:56%;width:18%;height:10%;}
+.fl-a2{top:52%;left:68%;width:22%;height:18%;}
+.combobar{display:flex;align-items:center;justify-content:center;gap:14px;margin:8px 0 2px;}
 .combobar.solo{font-size:13px;color:var(--ink-faint);}
 .cb-arrow{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:var(--surface);font-size:20px;line-height:1;color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .cb-arrow:active{background:var(--surface-2);}
@@ -469,7 +469,7 @@ function renderTopbar(){
   }else if(state.nav==='wardrobe'){
     const n=state.clothes.filter(c=>c.category==='衣服').length;
     tb.innerHTML=`<div class="tb-title">衣橱<span class="tb-sub">· ${state.clothes.length}件</span></div>
-      <div class="tb-actions"><button class="btn dark sm" data-act="freeMatch">自由搭配</button><button class="btn sm ${sortMode?'primary':''}" data-act="toggleSort">${sortMode?'完成 ✓':'↕ 排序'}</button><button class="btn round primary" data-act="addItem">＋</button></div>`;
+      <div class="tb-actions"><button class="btn dark sm" data-act="freeMatch">自由搭配</button><button class="btn sm ${sortMode?'primary':''}" data-act="toggleSort">${sortMode?'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="6 9 12 3 18 9"/><polyline points="6 15 12 21 18 15"/></svg> 完成':'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="6 9 12 3 18 9"/><polyline points="6 15 12 21 18 15"/></svg> 排序'}</button><button class="btn round primary" data-act="addItem">＋</button></div>`;
   }else if(state.nav==='library'){
     tb.innerHTML=`<div class="tb-title">搭配库</div><div class="tb-actions"><button class="btn round primary" data-act="addOutfit">＋</button></div>`;
   }else if(state.nav==='stats'){
@@ -882,8 +882,8 @@ function showModal(type, editId){
   }
   else if(type==='preview'){
     _pv=buildPreviewCombos(); _pvIdx=0;
-    content.innerHTML=`<h3>搭配预览</h3>
-      <p style="font-size:12px;color:var(--ink-faint);margin-bottom:6px;margin-top:-4px;">真人模板上滑一滑，换不同单品混搭 ↓</p>
+      content.innerHTML=`<h3>搭配预览</h3>
+      <p style="font-size:12px;color:var(--ink-faint);margin-bottom:6px;margin-top:-4px;">所有单品拼在一起，看看色系搭什么感觉 ↓</p>
       <div id="pvBody">${pvInner()}</div>
       <div class="acts" style="margin-top:14px;">
         <button class="btn" data-act="cancelPreview">继续选</button>
@@ -923,18 +923,23 @@ function buildPreviewCombos(){
   (function rec(ci){ if(ci===4){ combos.push({top:opts[0][idx[0]],bottom:opts[1][idx[1]],shoe:opts[2][idx[2]],acc:opts[3][idx[3]]}); return; } for(let k=0;k<opts[ci].length;k++){idx[ci]=k;rec(ci+1);} })(0);
   return {combos,groups};
 }
-function pvSlot(type,item){
-  const cls={top:'slot-top',bottom:'slot-bottom',shoe:'slot-shoe',acc:'slot-acc'}[type];
-  if(item&&item.img) return `<div class="slot ${cls}"><img src="${esc(item.img)}" alt="${esc(item.name||'')}"></div>`;
-  if(item) return `<div class="slot ${cls}"><span class="nm">${esc(item.name||'')}</span></div>`;
-  const ic={top:'👕',bottom:'👖',shoe:'👟',acc:'👜'}[type];
-  return `<div class="slot ${cls} empty">${ic}</div>`;
-}
 function pvInner(){
   if(!_pv) return '';
   const c=_pv.combos[_pvIdx]; const total=_pv.combos.length;
-  const sil=`<svg class="figsil" viewBox="0 0 200 400" xmlns="http://www.w3.org/2000/svg" fill="#ece6dd"><circle cx="100" cy="32" r="20"/><path d="M82 60 Q100 54 118 60 L126 150 Q100 162 74 150 Z"/><path d="M74 150 Q100 162 126 150 L122 214 Q100 226 78 214 Z"/><path d="M80 214 L92 214 L96 340 L82 342 L72 252 Z"/><path d="M120 214 L108 214 L104 340 L118 342 L128 252 Z"/><ellipse cx="79" cy="352" rx="15" ry="8"/><ellipse cx="121" cy="352" rx="15" ry="8"/></svg>`;
-  const fig=`<div class="figwrap" id="figwrap">${sil}${pvSlot('top',c.top)}${pvSlot('bottom',c.bottom)}${pvSlot('shoe',c.shoe)}${pvSlot('acc',c.acc)}</div>`;
+  // 平铺拼图:所有单品散落在一张卡片里
+  const flItem=(cls,item)=>{
+    if(!item) return '';
+    const nm=esc(item.name||'');
+    if(item.img) return `<div class="fl-item ${cls}"><img src="${esc(item.img)}" alt="${nm}"></div>`;
+    return `<div class="fl-item ${cls}" style="background:rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-size:22px;color:#b8b0a0;">?</div>`;
+  };
+  const fig=`<div class="flatlay-wrap" id="figwrap">
+    ${flItem('fl-t1',c.top)}
+    ${flItem('fl-b1',c.bottom)}
+    ${flItem('fl-s1',c.shoe)}
+    ${flItem('fl-a1',c.acc)}
+    ${flItem('fl-a2',_pv.groups.accs[1]!==c.acc?_pv.groups.accs[1]:null)}
+  </div>`;
   const bar = total>1 ? `<div class="combobar"><button class="cb-arrow" data-act="prevCombo">‹</button><div class="cb-mid"><div class="cb-num">搭配 ${_pvIdx+1} / ${total}</div><div class="cb-hint">← 左右滑动换搭 →</div></div><button class="cb-arrow" data-act="nextCombo">›</button></div>` : `<div class="combobar solo">已是一套搭配</div>`;
   const thr=(lab,key,arr)=>{ if(!arr||!arr.length) return ''; const active=c[key]; return `<div class="thr"><span class="thr-lab">${lab}</span><div class="thr-items">${arr.map(it=>`<div class="thr-item ${active&&active.id===it.id?'on':''}" data-act="pickThumb" data-cat="${key}" data-id="${it.id}">${it.img?`<img src="${esc(it.img)}" alt="">`:''}</div>`).join('')}</div></div>`; };
   const thumbs=thr('上装','top',_pv.groups.tops)+thr('下装','bottom',_pv.groups.bots)+thr('鞋','shoe',_pv.groups.shoes)+thr('配饰','acc',_pv.groups.accs);

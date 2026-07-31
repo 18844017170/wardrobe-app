@@ -230,6 +230,11 @@ img{display:block;}
 .quick-add .cam{font-size:19px;}
 .quick-add-hint{font-size:11px;color:var(--ink-faint);text-align:center;margin:-8px 0 16px;}
 
+/* ===== 备份/恢复 ===== */
+.backup-row{display:flex;gap:8px;margin:14px 0 4px;}
+.backup-row .btn{flex:1;font-size:12px;}
+#restoreInput{display:none;}
+
 /* ===== 拖拽排序 ===== */
 .sort-mode .item-actions{display:none;}
 .sort-mode .item-card{touch-action:none;cursor:grab;}
@@ -296,8 +301,13 @@ function _migrate(s){
 
 function save(){
   const data=JSON.stringify(state);
-  try{ localStorage.setItem(STORE_KEY,data); }catch(e){}
-  idbSave(data); // 异步写 IndexedDB（跨上下文共享）
+  // localStorage 有配额限制(iOS Safari ~5MB),超容时静默降级到只存 IndexedDB
+  try{ localStorage.setItem(STORE_KEY,data); }
+  catch(e){
+    console.warn('localStorage 超容,降级到 IndexedDB:',e.name);
+    try{ localStorage.removeItem(STORE_KEY); }catch(_){}
+  }
+  idbSave(data); // IndexedDB 容量大(~50MB+),跨上下文共享,图片存这里最稳
 }
 
 async function loadAsync(){
@@ -407,6 +417,23 @@ function esc(s){return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g
 function getClothById(id){return state.clothes.find(c=>c.id===id)||null;}
 function getClothIcon(type){return CLOTHING_ICONS[type]||CLOTHING_ICONS['上装'];}
 function imgTag(c){return c.img?`<img src="${esc(c.img)}" alt="${esc(c.name)}">`:`<div class="placeholder">${getClothIcon(c.type)}</div>`;}
+
+/* 图片压缩:上传的高清照片压缩到最大 800px 宽、JPEG 0.8 质量,大幅减少存储占用,防止 localStorage 超容丢图 */
+function compressImage(dataUrl, maxW, quality){
+  return new Promise((res)=>{
+    const img=new Image();
+    img.onload=()=>{
+      let w=img.width, h=img.height;
+      if(w>maxW){ h=Math.round(h*maxW/w); w=maxW; }
+      const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+      const ctx=cv.getContext('2d'); ctx.drawImage(img,0,0,w,h);
+      try{ res(cv.toDataURL('image/jpeg',quality)); }
+      catch(e){ res(dataUrl); } // 压缩失败用原图
+    };
+    img.onerror=()=>res(dataUrl);
+    img.src=dataUrl;
+  });
+}
 
 function computeStats(){
   const total=state.clothes.length;
@@ -684,6 +711,16 @@ function renderStats(){
         <div class="rank-info"><div class="rank-name">${esc(c.name)}</div><div class="rank-sub">${c.type}</div></div>
         <span class="rank-count">${c.wearCount||0}次</span>
       </div>`).join('')}
+  </div>
+
+  <div class="card" style="margin-top:14px;">
+    <h3 style="font-size:14px;font-weight:500;margin-bottom:6px;"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" style="vertical-align:-3px;margin-right:4px;"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 数据备份</h3>
+    <p style="font-size:11px;color:var(--ink-faint);margin-bottom:8px;line-height:1.6;">导出所有单品和搭配(含图片)到本地文件,换手机或重装时用"恢复"导入,图片不丢</p>
+    <div class="backup-row">
+      <button class="btn sm" data-act="exportData">📤 导出备份</button>
+      <button class="btn sm" data-act="restoreData">📥 恢复备份</button>
+    </div>
+    <input type="file" id="restoreInput" accept=".json">
   </div>`;
 }
 
@@ -722,6 +759,8 @@ function handleAction(act,el){
     case 'addItem': showModal('addItem'); break;
     case 'quickPhoto': { const inp=document.getElementById('quickPhotoInput'); if(inp) inp.click(); break; }
     case 'toggleSort': sortMode=!sortMode; renderModule(); break;
+    case 'exportData': exportBackup(); break;
+    case 'restoreData': { const inp=document.getElementById('restoreInput'); if(inp) inp.click(); break; }
     case 'cancelModal': closeModal(); break;
     case 'quickCatPick': {
       const k=el.dataset.cat;
@@ -1009,7 +1048,7 @@ document.addEventListener('click',e=>{
       save();closeModal();renderModule();toast(editId?'已修改':'已添加');
     };
     const fileInput=$('#mi_img');
-    if(fileInput&&fileInput.files[0]){const r=new FileReader();r.onload=()=>finish(r.result);r.readAsDataURL(fileInput.files[0]);}
+    if(fileInput&&fileInput.files[0]){const r=new FileReader();r.onload=async ()=>{const compressed=await compressImage(r.result,800,0.8);finish(compressed);};r.readAsDataURL(fileInput.files[0]);}
     else finish(undefined);
     return;
   }
@@ -1056,8 +1095,9 @@ function handleQuickPhotos(files, catKey){
   let done=0;
   arr.forEach((f,i)=>{
     const r=new FileReader();
-    r.onload=()=>{
-      state.clothes.push({id:uid(),name:label+' '+(i+1),category:cat.category,type:cat.type,season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:r.result,price:null,brand:'',wearCount:0,lastWorn:'',tags:[]});
+    r.onload=async ()=>{
+      const compressed=await compressImage(r.result,800,0.8);
+      state.clothes.push({id:uid(),name:label+' '+(i+1),category:cat.category,type:cat.type,season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:compressed,price:null,brand:'',wearCount:0,lastWorn:'',tags:[]});
       if(++done===arr.length) finish();
     };
     r.readAsDataURL(f);
@@ -1109,12 +1149,13 @@ function aiClassifyPhotos(files,apiKey){
           if(keys.some(k2=>raw.toLowerCase().includes(k2.toLowerCase()))){catKey=k;break;}
         }
         const cat=_CATMAP[catKey]||_CATMAP.top;
-        state.clothes.push({id:uid(),name:_CATLABEL[catKey]+' '+(added+1),category:cat.category,type:cat.type,season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:reader.result,price:null,brand:'',wearCount:0,lastWorn:'',tags:[],aiRaw:raw});
+        const compressed=await compressImage(reader.result,800,0.8);
+        state.clothes.push({id:uid(),name:_CATLABEL[catKey]+' '+(added+1),category:cat.category,type:cat.type,season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:compressed,price:null,brand:'',wearCount:0,lastWorn:'',tags:[],aiRaw:raw});
         added++;
       }catch(e){
         console.warn('AI classify error:',e);
-        // fallback:默认归为上装
-        state.clothes.push({id:uid(),name:'我的单品 '+(added+1),category:'衣服',type:'上装',season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:reader.result,price:null,brand:'',wearCount:0,lastWorn:'',tags:[]});
+        const compressed=await compressImage(reader.result,800,0.8);
+        state.clothes.push({id:uid(),name:'我的单品 '+(added+1),category:'衣服',type:'上装',season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:compressed,price:null,brand:'',wearCount:0,lastWorn:'',tags:[]});
         added++;
       }
       if(++done===arr.length){
@@ -1160,6 +1201,34 @@ function reorderClothes(ids){
   const inTab=c=>c.category===cat;
   const reordered=ids.map(id=>state.clothes.find(c=>c.id===id)).filter(Boolean);
   let i=0; state.clothes=state.clothes.map(c=> inTab(c)? reordered[i++] : c);
+}
+
+document.addEventListener('change',e=>{ if(e.target&&e.target.id==='restoreInput'){ restoreBackup(e.target.files[0]); e.target.value=''; } });
+
+/* ========== 数据备份/恢复(防止图片丢失) ========== */
+function exportBackup(){
+  const data=JSON.stringify(state);
+  const blob=new Blob([data],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download='穿搭私橱备份_'+todayStr()+'.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('已导出 '+state.clothes.length+' 件单品 + '+state.outfits.length+' 套搭配 ✓');
+}
+function restoreBackup(file){
+  if(!file){ toast('请选择备份文件'); return; }
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const s=JSON.parse(r.result);
+      if(!s.clothes){ toast('备份文件格式不对'); return; }
+      if(!confirm('确定恢复吗?当前数据会被覆盖')) return;
+      state=_migrate(s); save(); renderModule();
+      toast('已恢复 '+state.clothes.length+' 件单品 + '+state.outfits.length+' 套搭配 ✓');
+    }catch(e){ toast('恢复失败:文件格式错误'); }
+  };
+  r.readAsText(file);
 }
 
 /* ========== Toast ========== */

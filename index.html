@@ -324,22 +324,10 @@ async function loadAsync(){
       }
     }catch(e){}
   }
-  // 3. 兜底默认
+  // 3. 兜底默认(空衣橱,让用户自己传)
   const s=defaultState();
-  s.clothes=[
-    {id:uid(),name:'白色圆领短袖T恤',category:'衣服',type:'上装',season:['春','夏'],style:['简约'],color:'#EDE8E2',img:'',price:79,brand:'优衣库',wearCount:3,lastWorn:'2026-07-28',tags:['基础款','百搭']},
-    {id:uid(),name:'浅绿色宽松衬衫',category:'衣服',type:'上装',season:['春','秋'],style:['法式'],color:'#C8D4B8',img:'',price:259,brand:'COS',wearCount:1,lastWorn:'2026-07-20',tags:['通勤']},
-    {id:uid(),name:'黑色高腰阔腿裤',category:'衣服',type:'下装',season:['春','夏','秋'],style:['简约'],color:'#4A4540',img:'',price:329,brand:'Massimo',wearCount:5,lastWorn:'2026-07-29',tags:['显腿长']},
-    {id:uid(),name:'牛仔直筒裤',category:'衣服',type:'下装',season:['春','夏','秋'],style:['休闲'],color:'#7A8BA8',img:'',price:199,brand:'Levi\'s',wearCount:3,lastWorn:'2026-07-26',tags:['经典']},
-    {id:uid(),name:'白色乐福鞋',category:'鞋',type:'休闲鞋',season:['春','夏','秋'],style:['英伦'],color:'#D8D0C4',img:'',price:499,brand:'Skechers',wearCount:1,lastWorn:'2026-07-29',tags:['舒适']},
-    {id:uid(),name:'黑色链条小方包',category:'配饰',type:'包袋',season:['春','夏','秋','冬'],style:['法式'],color:'#3A3632',img:'',price:899,brand:'Charles',wearCount:6,lastWorn:'2026-07-29',tags:['百搭']},
-    {id:uid(),name:'银色细链项链',category:'配饰',type:'首饰',season:['春','夏','秋','冬'],style:['简约'],color:'#C8CCD4',img:'',price:159,brand:'APM',wearCount:8,lastWorn:'2026-07-29',tags:['日常']},
-  ];
-  s.outfits=[
-    {id:uid(),name:'清爽通勤Look',scene:'上班',temp:[24,26],weather:['晴','多云'],items:s.clothes.slice(0,5).map(c=>c.id),date:'2026-07-29',note:'白色T+黑阔腿+乐福鞋'},
-    {id:uid(),name:'周末约会甜美风',scene:'约会',temp:[24,28],weather:['晴','阴'],items:[s.clothes[0].id,s.clothes[2].id,s.clothes[4].id,s.clothes[5].id,s.clothes[6].id],date:'2026-07-27',note:'甜美温柔'},
-    {id:uid(),name:'文艺散步look',scene:'逛街',temp:[22,26],weather:['多云','阴'],items:[s.clothes[1].id,s.clothes[2].id,s.clothes[4].id],date:'2026-07-25',note:'文艺休闲'},
-  ];
+  s.clothes=[];
+  s.outfits=[];
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(s)); }catch(e){}
   idbSave(JSON.stringify(s));
   return s;
@@ -597,6 +585,7 @@ function renderWardrobe(){
   <div class="selector-label" style="margin-top:4px;margin-bottom:8px;font-size:13px;color:var(--ink-soft);font-weight:400;display:flex;align-items:center;gap:5px;"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>风格筛选</div>
 
   <div class="quick-add" data-act="quickPhoto"><span class="cam">📷</span> 拍照 / 选照片,一键添加多件</div>
+  ${state.clothes.length===0?`<div class="hint" style="margin-bottom:14px;background:#fff8e7;border:1px solid #f0d89d;border-radius:10px;text-align:left;"><p style="font-weight:500;font-size:12px;color:#8a6d30;">⚠️ 重要:请先添加到主屏幕!</p><p style="font-size:11px;color:#a0854a;line-height:1.7;margin-top:2px;">iOS 主屏幕和浏览器<strong>数据隔离</strong>。<br>正确做法:<br>① Safari 打开此链接 → <strong>分享 → 添加到主屏幕</strong><br>② 从<strong>主屏幕图标</strong>打开衣橱<br>③ 在里面传图片 → 永久保存<br><span style="color:#c00;">浏览器里传的图,主屏幕里看不到!</span></p></div>`:''}
   <div class="quick-add-hint">选完照片会自动变成单品,点卡片可补全名称、分类</div>
   ${sortMode?`<div class="sort-tip">按住卡片上下拖动即可调换顺序,完成后点「完成 ✓」</div>`:''}
 
@@ -617,7 +606,7 @@ function renderWardrobe(){
           <div class="item-tags">${(c.tags||[]).map(t=>`<span class="itag">${esc(t)}</span>`).join('')}</div>
         </div>
       </div>`).join('')
-    :'<div class="empty-state" style="grid-column:1/-1"><div class="placeholder" style="font-size:0;"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#ccc" stroke-width="1.2"><path d="M20.38 3.4L16 2a4 4 0 01-8 0L3.62 3.4A2 2 0 002 5.38v15.24A2 2 0 004 22h16a2 2 0 002-1.76V5.38a2 2 0 00-1.62-1.98z"/><line x1="12" y1="2" x2="12" y2="6"/></svg></div><p>这个分类还没有单品</p><p style="font-size:12px;margin-top:4px">点右上角 ＋ 添加你的单品</p></div>'}
+    :'<div class="empty-state" style="grid-column:1/-1"><div class="placeholder" style="font-size:0;"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#ccc" stroke-width="1.2"><path d="M20.38 3.4L16 2a4 4 0 01-8 0L3.62 3.4A2 2 0 002 5.38v15.24A2 2 0 004 22h16a2 2 0 002-1.76V5.38a2 2 0 00-1.62-1.98z"/><line x1="12" y1="2" x2="12" y2="6"/></svg></div><p style="font-weight:500;margin-top:8px;">这个分类还没有单品</p><p style="font-size:12px;margin-top:4px">点右上角 ＋ 或下方 📷 添加你的衣服</p><div class="hint" style="margin-top:10px;background:#fff8e7;border:1px solid #f0d89d;border-radius:10px;text-align:left;"><p style="font-weight:500;font-size:12px;color:#8a6d30;">⚠️ 重要:先加主屏幕,再传图片!</p><p style="font-size:11px;color:#a0854a;line-height:1.7;margin-top:2px;">iOS 主屏幕 App 和 Safari 标签页<b>数据不互通</b>。<br>正确顺序:<br>① 先在 Safari 打开此链接 → 分享 → <b>添加到主屏幕</b><br>② <b>从主屏幕图标打开</b>衣橱<br>③ 在里面传图片 → 永久保存<br><span style="color:#c00;">在 Safari 标签页传的图片,主屏幕里看不到!</span></p></div></div>'}
   </div>${(state.preview&&state.preview.length)?`<div class="preview-bar"><span class="cnt">已选 ${state.preview.length} 件搭配</span><button class="btn primary sm" data-act="openPreview">预览搭配</button><button class="btn sm" data-act="clearPreview">清空</button></div>`:''}`;
 }
 

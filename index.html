@@ -301,19 +301,17 @@ function _migrate(s){
 
 function save(){
   const data=JSON.stringify(state);
-  // localStorage 有配额限制(iOS Safari ~5MB),超容时静默降级到只存 IndexedDB
+  // 先写 IndexedDB(主力存储,跨分区共享),再写 localStorage(辅助缓存)
+  idbSave(data);
   try{ localStorage.setItem(STORE_KEY,data); }
   catch(e){
-    console.warn('localStorage 超容,降级到 IndexedDB:',e.name);
+    console.warn('localStorage 超容,已只存 IndexedDB:',e.name);
     try{ localStorage.removeItem(STORE_KEY); }catch(_){}
   }
-  idbSave(data); // IndexedDB 容量大(~50MB+),跨上下文共享,图片存这里最稳
 }
 
 async function loadAsync(){
-  // 1. localStorage
-  try{ const s=JSON.parse(localStorage.getItem(STORE_KEY)); if(s&&s.clothes) return _migrate(s); }catch(e){}
-  // 2. IndexedDB 回读（Safari / 主屏 App 共享，容量大）
+  // 1. IndexedDB 优先（跨分区共享:Safari 标签页 ↔ 主屏幕 App 同一域名下共享）
   const raw=await idbLoad();
   if(raw){
     try{
@@ -324,6 +322,8 @@ async function loadAsync(){
       }
     }catch(e){}
   }
+  // 2. localStorage 回读（兜底,缓存可能更新）
+  try{ const s=JSON.parse(localStorage.getItem(STORE_KEY)); if(s&&s.clothes){ idbSave(JSON.stringify(s)); return _migrate(s); } }catch(e){}
   // 3. 兜底默认(空衣橱,让用户自己传)
   const s=defaultState();
   s.clothes=[];
@@ -585,7 +585,6 @@ function renderWardrobe(){
   <div class="selector-label" style="margin-top:4px;margin-bottom:8px;font-size:13px;color:var(--ink-soft);font-weight:400;display:flex;align-items:center;gap:5px;"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>风格筛选</div>
 
   <div class="quick-add" data-act="quickPhoto"><span class="cam">📷</span> 拍照 / 选照片,一键添加多件</div>
-  ${state.clothes.length===0?`<div class="hint" style="margin-bottom:14px;background:#fff8e7;border:1px solid #f0d89d;border-radius:10px;text-align:left;"><p style="font-weight:500;font-size:12px;color:#8a6d30;">⚠️ 重要:请先添加到主屏幕!</p><p style="font-size:11px;color:#a0854a;line-height:1.7;margin-top:2px;">iOS 主屏幕和浏览器<strong>数据隔离</strong>。<br>正确做法:<br>① Safari 打开此链接 → <strong>分享 → 添加到主屏幕</strong><br>② 从<strong>主屏幕图标</strong>打开衣橱<br>③ 在里面传图片 → 永久保存<br><span style="color:#c00;">浏览器里传的图,主屏幕里看不到!</span></p></div>`:''}
   <div class="quick-add-hint">选完照片会自动变成单品,点卡片可补全名称、分类</div>
   ${sortMode?`<div class="sort-tip">按住卡片上下拖动即可调换顺序,完成后点「完成 ✓」</div>`:''}
 
@@ -606,7 +605,7 @@ function renderWardrobe(){
           <div class="item-tags">${(c.tags||[]).map(t=>`<span class="itag">${esc(t)}</span>`).join('')}</div>
         </div>
       </div>`).join('')
-    :'<div class="empty-state" style="grid-column:1/-1"><div class="placeholder" style="font-size:0;"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#ccc" stroke-width="1.2"><path d="M20.38 3.4L16 2a4 4 0 01-8 0L3.62 3.4A2 2 0 002 5.38v15.24A2 2 0 004 22h16a2 2 0 002-1.76V5.38a2 2 0 00-1.62-1.98z"/><line x1="12" y1="2" x2="12" y2="6"/></svg></div><p style="font-weight:500;margin-top:8px;">这个分类还没有单品</p><p style="font-size:12px;margin-top:4px">点右上角 ＋ 或下方 📷 添加你的衣服</p><div class="hint" style="margin-top:10px;background:#fff8e7;border:1px solid #f0d89d;border-radius:10px;text-align:left;"><p style="font-weight:500;font-size:12px;color:#8a6d30;">⚠️ 重要:先加主屏幕,再传图片!</p><p style="font-size:11px;color:#a0854a;line-height:1.7;margin-top:2px;">iOS 主屏幕 App 和 Safari 标签页<b>数据不互通</b>。<br>正确顺序:<br>① 先在 Safari 打开此链接 → 分享 → <b>添加到主屏幕</b><br>② <b>从主屏幕图标打开</b>衣橱<br>③ 在里面传图片 → 永久保存<br><span style="color:#c00;">在 Safari 标签页传的图片,主屏幕里看不到!</span></p></div></div>'}
+    :'<div class="empty-state" style="grid-column:1/-1"><div class="placeholder" style="font-size:0;"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#ccc" stroke-width="1.2"><path d="M20.38 3.4L16 2a4 4 0 01-8 0L3.62 3.4A2 2 0 002 5.38v15.24A2 2 0 004 22h16a2 2 0 002-1.76V5.38a2 2 0 00-1.62-1.98z"/><line x1="12" y1="2" x2="12" y2="6"/></svg></div><p style="font-weight:500;margin-top:8px;">这个分类还没有单品</p><p style="font-size:12px;color:var(--ink-faint);margin-top:4px;">点右上角 ＋ 或下方 📷 添加你的衣服</p></div>'}
   </div>${(state.preview&&state.preview.length)?`<div class="preview-bar"><span class="cnt">已选 ${state.preview.length} 件搭配</span><button class="btn primary sm" data-act="openPreview">预览搭配</button><button class="btn sm" data-act="clearPreview">清空</button></div>`:''}`;
 }
 

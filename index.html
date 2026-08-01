@@ -586,7 +586,7 @@ function renderWardrobe(){
   <div class="selector-label" style="margin-top:4px;margin-bottom:8px;font-size:13px;color:var(--ink-soft);font-weight:400;display:flex;align-items:center;gap:5px;"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>风格筛选</div>
 
   <div class="quick-add" data-act="quickPhoto"><span class="cam">📷</span> 拍照 / 选照片,一键添加多件</div>
-  <div class="quick-add-hint">选完照片会自动变成单品,点卡片可补全名称、分类</div>
+  <div class="quick-add-hint">选完照片会自动变成单品,点卡片可修改名称与分类</div>
   ${sortMode?`<div class="sort-tip">按住卡片上下拖动即可调换顺序,完成后点「完成 ✓」</div>`:''}
 
   <div class="closet-grid${sortMode?' sort-mode':''}">
@@ -844,12 +844,25 @@ function seasonFit(item, climate){
   if(climate==='cold')   return s.includes('冬')||s.includes('秋');
   return true;
 }
-/* 季节过滤；过滤后为空则退回全部，并记录"缺当季衣物"警告 */
+/* 类型×气候 硬性排除：即使季节标签标错,也按品类强信号避开反季节单品
+   凉鞋仅夏/暖；高跟鞋不进冬；靴子不进夏；大外套不进夏；背心/吊带/无袖不进微凉与冬；短袖不进冬 */
+function itemClimateBan(it, climate){
+  const ty=it.type||'', nm=(it.name||'');
+  if(ty==='凉鞋'   && climate!=='summer' && climate!=='warm') return true;
+  if(ty==='高跟鞋' && climate==='cold') return true;
+  if(ty==='靴子'   && climate==='summer') return true;
+  if(ty==='外套'   && climate==='summer') return true;
+  if(/背心|吊带|无袖|坎肩|热裤/.test(nm) && (climate==='cold'||climate==='cool')) return true;
+  if(/短袖|t恤/i.test(nm) && climate==='cold') return true;
+  return false;
+}
+/* 季节过滤：品类硬禁(凉鞋/背心/大外套等)永不回退；仅季节适配可回退 */
 function filterSeason(arr, climate, warn, label){
-  const f=arr.filter(it=>seasonFit(it,climate));
-  if(f.length) return f;
-  if(label) warn.push(label);
-  return arr;
+  const hard=arr.filter(it=>!itemClimateBan(it,climate));      // 反季节品类一律剔除
+  const f=hard.filter(it=>seasonFit(it,climate));               // 再按季节标签适配
+  const res=f.length?f:hard;                                    // 季节无匹配则退回"已剔除反季节"的集合
+  if(!res.length && label) warn.push(label);                    // 连硬集合都空=确实缺该类当季衣物
+  return res;
 }
 /* 是否短袖/夏装（用于叠穿与"天冷不推短袖"判断） */
 function isShortSleeve(it){
@@ -952,11 +965,13 @@ function generateOutfit(){
   // —— 鞋 ——
   take(pickBest(fShoes,scene,climate));
 
-  // —— 配饰：至少1件；正式/聚会/约会可2件 ——
+  // —— 配饰：至少1件；正式/聚会/约会可2件；同类不重复(不出现两个包包/眼镜/项链) ——
   const needAcc = (formal||scene==='聚会'||scene==='约会')?2:1;
+  const accPicked=[];
   for(let i=0;i<needAcc;i++){
-    const a=pickBest(fAccs.filter(x=>!used.has(x.id)),scene,climate);
-    if(a) take(a); else break;
+    const pool=fAccs.filter(x=>!used.has(x.id) && !accPicked.some(p=>p.type===x.type));
+    const a=pickBest(pool,scene,climate);
+    if(a){ take(a); accPicked.push(a); } else break;
   }
   if(!chosen.some(c=>c.category==='配饰')){
     const a=pickBest(fAccs,scene,climate); if(a) take(a);
@@ -1304,32 +1319,45 @@ function attachSortHandlers(){
   const grid=document.querySelector('.closet-grid'); if(!grid) return;
   grid.querySelectorAll('.item-card').forEach(card=>card.addEventListener('pointerdown', e=>onDragStart(e, card, grid)));
 }
+/* 两个节点在 DOM 中互换位置(处理相邻/非相邻) */
+function swapNodes(a, b){
+  if(a===b) return;
+  const aNext=a.nextSibling, bNext=b.nextSibling;
+  if(aNext===b){ a.parentNode.insertBefore(b, a); }
+  else if(bNext===a){ b.parentNode.insertBefore(a, b); }
+  else { a.parentNode.insertBefore(b, aNext); b.parentNode.insertBefore(a, bNext); }
+}
 /* iOS 可靠拖拽：监听挂到 document(不依赖指针捕获)，拖拽时实时把卡片插入新位置 */
 function onDragStart(e, card, grid){
   if(!sortMode) return;
-  if(e.button!==undefined && e.button!==0 && e.pointerType==='mouse') return;
+  if(e.pointerType==='mouse' && e.button!==0) return;
   e.preventDefault();
   const startX=e.clientX, startY=e.clientY; let started=false;
+  // iOS 关键：仅 preventDefault pointer 事件拦不住滚动,必须单独在 touchmove 上阻止默认,否则页面滚动触发 pointercancel 中断拖拽
+  const preventScroll=ev=>{ try{ ev.preventDefault(); }catch(_){} };
+  document.addEventListener('touchmove', preventScroll, {passive:false});
   function onMove(ev){
     const dx=ev.clientX-startX, dy=ev.clientY-startY;
     if(!started){
       if(Math.hypot(dx,dy)<6) return;
       started=true;
       card.classList.add('dragging');
+      card.style.pointerEvents='none'; // 让 elementFromPoint 穿透,找到指针下方的卡片
       document.body.style.userSelect='none';
     }
-    // 实时计算目标位置并插入（其他卡片会即时让位）
-    const others=[...grid.querySelectorAll('.item-card')].filter(c=>c!==card);
-    let ref=null;
-    for(const o of others){ const r=o.getBoundingClientRect(); if(ev.clientY < r.top + r.height/2){ ref=o; break; } }
-    if(ref) grid.insertBefore(card, ref); else grid.appendChild(card);
+    // 自由调换：指针压在哪张卡片上,就和它实时互换位置(任意方向/任意位置)
+    const el=document.elementFromPoint(ev.clientX, ev.clientY);
+    const target=el&&el.closest?el.closest('.item-card'):null;
+    if(target && target!==card && grid.contains(target)) swapNodes(card, target);
   }
   function onUp(){
     document.removeEventListener('pointermove', onMove, true);
     document.removeEventListener('pointerup', onUp, true);
     document.removeEventListener('pointercancel', onUp, true);
+    document.removeEventListener('touchmove', preventScroll, {passive:false});
     if(!started) return;
     card.classList.remove('dragging');
+    card.style.pointerEvents='';
     document.body.style.userSelect='';
     const ids=[...grid.querySelectorAll('.item-card')].map(c=>c.dataset.id);
     reorderClothes(ids); save(); renderModule();

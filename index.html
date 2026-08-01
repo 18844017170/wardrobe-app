@@ -237,8 +237,8 @@ img{display:block;}
 
 /* ===== 拖拽排序 ===== */
 .sort-mode .item-actions{display:none;}
-.sort-mode .item-card{touch-action:none;cursor:grab;}
-.item-card.dragging{opacity:.9;transform:scale(1.03);z-index:6;box-shadow:0 10px 24px rgba(0,0,0,.22);cursor:grabbing;}
+.sort-mode .item-card{touch-action:none;-webkit-user-select:none;user-select:none;cursor:grab;}
+.item-card.dragging{opacity:.92;position:relative;z-index:6;box-shadow:0 12px 28px rgba(0,0,0,.24);cursor:grabbing;}
 .sort-tip{font-size:11px;color:var(--ink-faint);text-align:center;margin:4px 0 12px;}
 
 /* ===== 快速上传选类 ===== */
@@ -589,7 +589,7 @@ function renderWardrobe(){
   <div class="quick-add-hint">选完照片会自动变成单品,点卡片可补全名称、分类</div>
   ${sortMode?`<div class="sort-tip">按住卡片上下拖动即可调换顺序,完成后点「完成 ✓」</div>`:''}
 
-  <div class="closet-grid">
+  <div class="closet-grid${sortMode?' sort-mode':''}">
     ${items.length?items.map(c=>`
       <div class="item-card" data-id="${c.id}">
         <div class="item-img">${imgTag(c)}
@@ -1302,31 +1302,41 @@ function aiClassifyPhotos(files,apiKey){
 /* ========== 拖拽排序（触摸 Pointer 事件） ========== */
 function attachSortHandlers(){
   const grid=document.querySelector('.closet-grid'); if(!grid) return;
-  grid.querySelectorAll('.item-card').forEach(card=>card.addEventListener('pointerdown', onDragStart));
+  grid.querySelectorAll('.item-card').forEach(card=>card.addEventListener('pointerdown', e=>onDragStart(e, card, grid)));
 }
-function onDragStart(e){
+/* iOS 可靠拖拽：监听挂到 document(不依赖指针捕获)，拖拽时实时把卡片插入新位置 */
+function onDragStart(e, card, grid){
   if(!sortMode) return;
-  const card=e.currentTarget, grid=card.parentElement;
-  const startX=e.clientX, startY=e.clientY; let started=false, lastY=startY;
-  function move(ev){
+  if(e.button!==undefined && e.button!==0 && e.pointerType==='mouse') return;
+  e.preventDefault();
+  const startX=e.clientX, startY=e.clientY; let started=false;
+  function onMove(ev){
     const dx=ev.clientX-startX, dy=ev.clientY-startY;
-    if(!started){ if(Math.hypot(dx,dy)<6) return; started=true; card.classList.add('dragging'); try{card.setPointerCapture(e.pointerId);}catch(_){} }
-    card.style.transform=`translate(${dx}px,${dy}px)`; lastY=ev.clientY;
-  }
-  function up(){
-    card.removeEventListener('pointermove',move); card.removeEventListener('pointerup',up); card.removeEventListener('pointercancel',up);
-    if(!started) return;
-    card.classList.remove('dragging'); card.style.transform='';
-    const ids=[...grid.querySelectorAll('.item-card')].map(c=>c.dataset.id);
-    const from=ids.indexOf(card.dataset.id); ids.splice(from,1);
+    if(!started){
+      if(Math.hypot(dx,dy)<6) return;
+      started=true;
+      card.classList.add('dragging');
+      document.body.style.userSelect='none';
+    }
+    // 实时计算目标位置并插入（其他卡片会即时让位）
     const others=[...grid.querySelectorAll('.item-card')].filter(c=>c!==card);
     let ref=null;
-    for(const o of others){ const r=o.getBoundingClientRect(); if(lastY < r.top + r.height/2){ ref=o; break; } }
-    const insertAt = ref? ids.indexOf(ref.dataset.id) : ids.length;
-    ids.splice(insertAt,0,card.dataset.id);
+    for(const o of others){ const r=o.getBoundingClientRect(); if(ev.clientY < r.top + r.height/2){ ref=o; break; } }
+    if(ref) grid.insertBefore(card, ref); else grid.appendChild(card);
+  }
+  function onUp(){
+    document.removeEventListener('pointermove', onMove, true);
+    document.removeEventListener('pointerup', onUp, true);
+    document.removeEventListener('pointercancel', onUp, true);
+    if(!started) return;
+    card.classList.remove('dragging');
+    document.body.style.userSelect='';
+    const ids=[...grid.querySelectorAll('.item-card')].map(c=>c.dataset.id);
     reorderClothes(ids); save(); renderModule();
   }
-  card.addEventListener('pointermove',move); card.addEventListener('pointerup',up); card.addEventListener('pointercancel',up);
+  document.addEventListener('pointermove', onMove, true);
+  document.addEventListener('pointerup', onUp, true);
+  document.addEventListener('pointercancel', onUp, true);
 }
 function reorderClothes(ids){
   const catMap={clothes:'衣服',shoes:'鞋',acc:'配饰'}; const cat=catMap[state.wardrobeTab];

@@ -424,6 +424,32 @@ function compressImage(dataUrl, maxW, quality){
   });
 }
 
+/* 从 File 直接解码压缩:尽量不把整张原图先转成 base64 字符串,降低手机内存峰值。
+   优先 createImageBitmap(直接从 Blob 解码,跳过 base64 中间态),解码后立刻 close 释放位图;
+   老设备不支持时回退到 FileReader→compressImage。 */
+function compressImageFromFile(file, maxW, quality){
+  return new Promise((resolve)=>{
+    const fallback=()=>{
+      const r=new FileReader();
+      r.onload=()=>compressImage(r.result,maxW,quality).then(resolve).catch(()=>resolve(r.result||''));
+      r.onerror=()=>resolve('');
+      r.readAsDataURL(file);
+    };
+    if(typeof createImageBitmap!=='function' || !file){ fallback(); return; }
+    createImageBitmap(file).then(bmp=>{
+      try{
+        let w=bmp.width, h=bmp.height;
+        if(w>maxW){ h=Math.round(h*maxW/w); w=maxW; }
+        const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+        const ctx=cv.getContext('2d'); ctx.drawImage(bmp,0,0,w,h);
+        if(bmp.close) bmp.close(); // 立刻释放解码后的位图,避免多张大图位图堆积撑爆内存
+        try{ resolve(cv.toDataURL('image/jpeg',quality)); }
+        catch(e){ resolve(''); }
+      }catch(e){ if(bmp&&bmp.close) bmp.close(); fallback(); }
+    }).catch(()=>{ fallback(); });
+  });
+}
+
 function computeStats(){
   const total=state.clothes.length;
   const thisMonth=state.outfits.filter(o=>o.date&&o.date.startsWith(todayStr().slice(0,7))).length;
@@ -1173,7 +1199,7 @@ function refreshPreviewUI(){ const b=$('#pvBody'); if(b) b.innerHTML=pvInner(); 
 function pvGo(d){ if(!_pv||_pv.combos.length<2) return; _pvIdx=(_pvIdx+d+_pv.combos.length)%_pv.combos.length; refreshPreviewUI(); }
 
 /* 弹窗内动作 */
-document.addEventListener('click',e=>{
+document.addEventListener('click',async e=>{
   const el=e.target.closest('[data-act]'); if(!el) return;
   const act=el.dataset.act;
   if(act==='closeModal'){closeModal();return;}
@@ -1195,7 +1221,7 @@ document.addEventListener('click',e=>{
       save();closeModal();renderModule();toast(editId?'已修改':'已添加');
     };
     const fileInput=$('#mi_img');
-    if(fileInput&&fileInput.files[0]){const r=new FileReader();r.onload=async ()=>{const compressed=await compressImage(r.result,800,0.8);finish(compressed);};r.readAsDataURL(fileInput.files[0]);}
+    if(fileInput&&fileInput.files[0]){const compressed=await compressImageFromFile(fileInput.files[0],700,0.8);finish(compressed);}
     else finish(undefined);
     return;
   }
@@ -1235,30 +1261,28 @@ const _AI_MAP={
   '包|手提包|斜挎包|背包|双肩包|链条包|托特包|bag|handbag|purse|backpack|tote':'bag',
   '帽子|墨镜|眼镜|项链|耳环|手链|戒指|手表|丝巾|腰带|发饰|cap|hat|sunglasses|glasses|necklace|earring|bracelet|watch|scarf|belt':'acc'
 };
-function handleQuickPhotos(files, catKey){
+async function handleQuickPhotos(files, catKey){
   const arr=Array.from(files||[]).filter(f=>f&&f.type&&f.type.indexOf('image/')===0); if(!arr.length) return;
   const cat=_CATMAP[catKey]||{category:'衣服',type:'上装'};
   const label=_CATLABEL[catKey]||'单品';
-  let done=0;
-  arr.forEach((f,i)=>{
-    const r=new FileReader();
-    r.onload=async ()=>{
-      const compressed=await compressImage(r.result,800,0.8);
-      state.clothes.push({id:uid(),name:label+' '+(i+1),category:cat.category,type:cat.type,season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:compressed,price:null,brand:'',wearCount:0,lastWorn:'',tags:[]});
-      if(++done===arr.length) finish();
-    };
-    r.readAsDataURL(f);
-  });
-  function finish(){ save(); renderModule(); toast('已添加 '+arr.length+' 件'+label+' ✓'); }
+  toast('正在添加 '+arr.length+' 张照片...');
+  // 逐张顺序处理:压缩完一张再处理下一张,绝不让多张大图同时解码,避免手机内存瞬间被打爆
+  for(let i=0;i<arr.length;i++){
+    const f=arr[i];
+    const compressed=await compressImageFromFile(f,700,0.8);
+    state.clothes.push({id:uid(),name:label+' '+(i+1),category:cat.category,type:cat.type,season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:compressed,price:null,brand:'',wearCount:0,lastWorn:'',tags:[]});
+  }
+  save(); renderModule();
+  toast('已添加 '+arr.length+' 件'+label+' ✓');
 }
 document.addEventListener('change',e=>{ if(e.target&&e.target.id==='quickPhotoInput'){ if(e.target.files&&e.target.files.length){ _pendingPhotos=Array.from(e.target.files); showModal('quickCat'); } e.target.value=''; } });
 
 /* ========== AI 智能识别分类 (Google Gemini Vision) ========== */
-function aiClassifyPhotos(files,apiKey){
+async function aiClassifyPhotos(files,apiKey){
   const arr=Array.from(files||[]).filter(f=>f&&f.type&&f.type.indexOf('image/')===0);
   if(!arr.length){ toast('没有有效图片'); return; }
   toast('AI 正在识别 '+arr.length+' 张照片...');
-  let done=0, added=0;
+  let added=0;
   const prompt=`你是一个服装分类专家。请判断这张图片中的单品属于以下哪一类，只返回一个类别关键词：
 上装、下装外套、连衣裙、鞋、包包、配饰。
 规则：
@@ -1271,47 +1295,45 @@ function aiClassifyPhotos(files,apiKey){
 - 墨镜/帽子/项链/耳环/手表/腰带/丝巾 → 配饰
 
 只回复一个词，不要解释。`;
-  arr.forEach((f,i)=>{
-    const reader=new FileReader();
-    reader.onload=async ()=>{
+  // 逐张顺序处理:读图→识别→压缩→入库,完成一张再做下一张,避免多张大图同时解码撑爆手机内存
+  for(let i=0;i<arr.length;i++){
+    const f=arr[i];
+    try{
+      const b64=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res((r.result||'').split(',')[1]||''); r.onerror=rej; r.readAsDataURL(f); });
+      const resp=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+apiKey,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          contents:[{parts:[
+            {text:prompt},
+            {inline_data:{mime_type:f.type,data:b64}}
+          ]}],
+          generationConfig:{temperature:0.1,maxOutputTokens:10}
+        })
+      });
+      const data=await resp.json();
+      let raw=(data.candidates?.[0]?.content?.parts?.[0]?.text||'').trim();
+      let catKey='top';
+      for(const [k,v] of Object.entries(_AI_MAP)){
+        const keys=v.split('|');
+        if(keys.some(k2=>raw.toLowerCase().includes(k2.toLowerCase()))){catKey=k;break;}
+      }
+      const cat=_CATMAP[catKey]||_CATMAP.top;
+      const compressed=await compressImage('data:'+f.type+';base64,'+b64,700,0.8);
+      state.clothes.push({id:uid(),name:_CATLABEL[catKey]+' '+(added+1),category:cat.category,type:cat.type,season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:compressed,price:null,brand:'',wearCount:0,lastWorn:'',tags:[],aiRaw:raw});
+      added++;
+    }catch(e){
+      console.warn('AI classify error:',e);
       try{
-        const b64=reader.result.split(',')[1];
-        const resp=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key='+apiKey,{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({
-            contents:[{parts:[
-              {text:prompt},
-              {inline_data:{mime_type:f.type,data:b64}}
-            ]}],
-            generationConfig:{temperature:0.1,maxOutputTokens:10}
-          })
-        });
-        const data=await resp.json();
-        let raw=(data.candidates?.[0]?.content?.parts?.[0]?.text||'').trim();
-        // 匹配类别
-        let catKey='top';
-        for(const [k,v] of Object.entries(_AI_MAP)){
-          const keys=v.split('|');
-          if(keys.some(k2=>raw.toLowerCase().includes(k2.toLowerCase()))){catKey=k;break;}
-        }
-        const cat=_CATMAP[catKey]||_CATMAP.top;
-        const compressed=await compressImage(reader.result,800,0.8);
-        state.clothes.push({id:uid(),name:_CATLABEL[catKey]+' '+(added+1),category:cat.category,type:cat.type,season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:compressed,price:null,brand:'',wearCount:0,lastWorn:'',tags:[],aiRaw:raw});
-        added++;
-      }catch(e){
-        console.warn('AI classify error:',e);
-        const compressed=await compressImage(reader.result,800,0.8);
+        const big=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result||''); r.onerror=rej; r.readAsDataURL(f); });
+        const compressed=await compressImage(big,700,0.8);
         state.clothes.push({id:uid(),name:'我的单品 '+(added+1),category:'衣服',type:'上装',season:['春','夏','秋','冬'],style:['简约'],color:'#dddddd',img:compressed,price:null,brand:'',wearCount:0,lastWorn:'',tags:[]});
         added++;
-      }
-      if(++done===arr.length){
-        save(); renderModule();
-        toast('AI 识别完成!已添加 '+added+' 件 ✓');
-      }
-    };
-    reader.readAsDataURL(f);
-  });
+      }catch(e2){}
+    }
+  }
+  save(); renderModule();
+  toast('AI 识别完成!已添加 '+added+' 件 ✓');
 }
 
 /* ========== 拖拽排序（触摸 Pointer 事件） ========== */
